@@ -196,12 +196,36 @@ def compress_file(
     Returns True on success, False on failure.
     The *timeout* parameter limits how long ffmpeg may run (default: 10 hours).
     """
+    sidecar_srt = src.with_suffix(".srt")
+    include_sidecar_srt = dst.suffix.lower() == ".mkv" and sidecar_srt.is_file()
+
     cmd = [
         ffmpeg_executable,
         "-v",
         "error",
         "-i",
         str(src),
+    ]
+
+    if include_sidecar_srt:
+        log(f"  Captions   : Found sidecar '{sidecar_srt.name}', embedding into MKV")
+        cmd.extend(["-i", str(sidecar_srt)])
+
+    subtitle_codec = "copy" if dst.suffix.lower() == ".mkv" else "mov_text"
+
+    cmd.extend([
+        "-map",
+        "0:v?",
+        "-map",
+        "0:a?",
+        "-map",
+        "0:s?",
+    ])
+
+    if include_sidecar_srt:
+        cmd.extend(["-map", "1:0"])
+
+    cmd.extend([
         "-c:v",
         "libx265",
         "-crf",
@@ -212,12 +236,14 @@ def compress_file(
         "aac",
         "-b:a",
         "128k",
+        "-c:s",
+        subtitle_codec,
         "-progress",
         "pipe:1",
         "-nostats",
         "-y",
         str(dst),
-    ]
+    ])
 
     total_duration = get_media_duration_seconds(src, ffprobe_executable)
     timeout_reached = threading.Event()

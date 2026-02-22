@@ -6,6 +6,8 @@ A Python script that compresses MP4 and MKV video files into a smaller file size
 
 - Compresses `.mp4` and `.mkv` files using H.265 (`libx265`) + AAC audio
 - Preserves original filenames/extensions in output (e.g. `movie.mkv -> movie.mkv`)
+- Preserves caption/subtitle streams from the source file
+- Auto-embeds matching sidecar `.srt` (same filename) into `.mkv` outputs
 - Configurable per-file timeout via `.env` (`TIMEOUT_SECONDS`)
 - Timestamped console logs for all status/error messages
 - Live per-file progress output during compression
@@ -69,6 +71,8 @@ python compress.py
 The script will:
 - Scan `INPUT_DIR` for `.mp4` and `.mkv` files
 - Compress each file using H.265 video and AAC audio
+- Keep subtitle/caption streams from the source file
+- Add `movie.srt` automatically when compressing `movie.mkv` (if found in the same folder)
 - Save the results to `OUTPUT_DIR`
 - Print a startup banner with CRF and timeout settings
 - Show timestamped logs for status and errors
