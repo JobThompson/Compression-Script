@@ -4,9 +4,10 @@ A Python script that compresses MP4 and MKV video files into a smaller file size
 
 ## Features
 
-- Compresses `.mp4` and `.mkv` files using H.265 (`libx265`) + AAC audio
+- Compresses `.mp4` and `.mkv` files using H.265 (`libx265`) + AAC audio (AVI output uses Xvid + MP3)
 - Preserves original filenames/extensions in output (e.g. `movie.mkv -> movie.mkv`)
-- Preserves caption/subtitle streams from the source file
+- Supports output container selection via `.env` (`OUTPUT_FORMAT=source|mkv|mp4|avi`)
+- Preserves caption/subtitle streams from the source file for MKV/MP4 outputs
 - Auto-embeds matching sidecar `.srt` (same filename) into `.mkv` outputs
 - Configurable per-file timeout via `.env` (`TIMEOUT_SECONDS`)
 - Timestamped console logs for all status/error messages
@@ -53,6 +54,7 @@ winget install Gyan.FFmpeg
    OUTPUT_DIR=/path/to/compressed/output
    CRF=28
    TIMEOUT_SECONDS=36000
+   OUTPUT_FORMAT=source
    ```
 
    | Variable          | Description                                                                 |
@@ -61,6 +63,7 @@ winget install Gyan.FFmpeg
    | `OUTPUT_DIR`      | Folder where the compressed files will be saved (created if it doesn't exist) |
    | `CRF`             | Constant Rate Factor for H.265 (0–51). Lower = better quality, larger file. Default: `28` |
    | `TIMEOUT_SECONDS` | Max runtime per file before ffmpeg is stopped. Must be a positive integer. Default: `36000` (10 hours) |
+   | `OUTPUT_FORMAT`   | Output container format: `source`, `mkv`, `mp4`, or `avi`. Default: `source` |
 
 ## Usage
 
@@ -72,7 +75,8 @@ The script will:
 - Scan `INPUT_DIR` for `.mp4` and `.mkv` files
 - Compress each file using H.265 video and AAC audio
 - Keep subtitle/caption streams from the source file
-- Add `movie.srt` automatically when compressing `movie.mkv` (if found in the same folder)
+- Add `movie.srt` automatically when output is MKV and `movie.mkv` is being compressed (if found in the same folder)
+- Write outputs using `OUTPUT_FORMAT` (including `avi`)
 - Save the results to `OUTPUT_DIR`
 - Print a startup banner with CRF and timeout settings
 - Show timestamped logs for status and errors
@@ -84,6 +88,7 @@ The script will:
 ```
 [2026-02-22 14:01:03] Found 3 file(s) to compress (CRF=28).
 [2026-02-22 14:01:03] Timeout per file: 10:00:00 (36000s)
+[2026-02-22 14:01:03] Output format: source
 [2026-02-22 14:01:03] Output folder: /path/to/compressed/output
 
 [2026-02-22 14:01:03] [1/3] movie.mkv -> movie.mkv
