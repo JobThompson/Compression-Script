@@ -7,9 +7,10 @@ A Python script that compresses MP4 and MKV video files into a smaller file size
 - Compresses `.mp4` and `.mkv` files using H.265 (`libx265`) + AAC audio (AVI output uses Xvid + MP3)
 - Preserves original filenames/extensions in output (e.g. `movie.mkv -> movie.mkv`)
 - Supports output container selection via `.env` (`OUTPUT_FORMAT=source|mkv|mp4|avi`)
+- Supports x265 speed/quality tuning via `.env` (`ENCODER_PRESET`)
 - Preserves caption/subtitle streams from the source file for MKV/MP4 outputs
 - Auto-embeds matching sidecar `.srt` (same filename) into `.mkv` outputs
-- Configurable per-file timeout via `.env` (`TIMEOUT_SECONDS`)
+- Configurable per-file timeout via `.env` (`TIMEOUT_SECONDS`, set `0` to disable)
 - Timestamped console logs for all status/error messages
 - Live per-file progress output during compression
    - Shows percentage progress bar when `ffprobe` is available
@@ -55,6 +56,7 @@ winget install Gyan.FFmpeg
    CRF=28
    TIMEOUT_SECONDS=36000
    OUTPUT_FORMAT=source
+   ENCODER_PRESET=medium
    ```
 
    | Variable          | Description                                                                 |
@@ -62,8 +64,16 @@ winget install Gyan.FFmpeg
    | `INPUT_DIR`       | Folder containing the source MP4/MKV files to compress                      |
    | `OUTPUT_DIR`      | Folder where the compressed files will be saved (created if it doesn't exist) |
    | `CRF`             | Constant Rate Factor for H.265 (0–51). Lower = better quality, larger file. Default: `28` |
-   | `TIMEOUT_SECONDS` | Max runtime per file before ffmpeg is stopped. Must be a positive integer. Default: `36000` (10 hours) |
+   | `TIMEOUT_SECONDS` | Max runtime per file before ffmpeg is stopped. Integer `>= 0`; `0` disables timeout. Default: `36000` (10 hours) |
    | `OUTPUT_FORMAT`   | Output container format: `source`, `mkv`, `mp4`, or `avi`. Default: `source` |
+   | `ENCODER_PRESET`  | x265 preset for MKV/MP4 output (`ultrafast`..`placebo`). Faster presets run quicker but can increase output size. Default: `medium` |
+
+For very large files (50GB+), recommended settings:
+
+```ini
+TIMEOUT_SECONDS=0
+ENCODER_PRESET=faster
+```
 
 ## Usage
 
@@ -88,6 +98,7 @@ The script will:
 ```
 [2026-02-22 14:01:03] Found 3 file(s) to compress (CRF=28).
 [2026-02-22 14:01:03] Timeout per file: 10:00:00 (36000s)
+[2026-02-22 14:01:03] Encoder preset: medium
 [2026-02-22 14:01:03] Output format: source
 [2026-02-22 14:01:03] Output folder: /path/to/compressed/output
 

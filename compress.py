@@ -6,8 +6,9 @@ Reads configuration from a .env file in the same directory:
   INPUT_DIR        - folder containing source video files
   OUTPUT_DIR       - folder where compressed files will be saved
   CRF              - Constant Rate Factor for H.265 encoding (default: 28)
-  TIMEOUT_SECONDS  - maximum ffmpeg runtime per file (default: 36000)
+    TIMEOUT_SECONDS  - maximum ffmpeg runtime per file (default: 36000, 0=disabled)
     OUTPUT_FORMAT    - output container: source, mkv, mp4, avi (default: source)
+    ENCODER_PRESET   - x265 preset for mkv/mp4 outputs (default: medium)
 
 Requires ffmpeg to be installed and available on PATH.
 """
@@ -24,6 +25,18 @@ from dotenv import load_dotenv
 
 SUPPORTED_EXTENSIONS = {".mp4", ".mkv"}
 SUPPORTED_OUTPUT_FORMATS = {"source", "mkv", "mp4", "avi"}
+SUPPORTED_X265_PRESETS = {
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+    "placebo",
+}
 
 
 def timestamp_prefix() -> str:
@@ -44,7 +57,7 @@ def log_error(message: str) -> None:
     print(f"{timestamp_prefix()} {message}", file=sys.stderr)
 
 
-def load_config() -> tuple[Path, Path, int, int, str]:
+def load_config() -> tuple[Path, Path, int, int, str, str]:
     """Load and validate configuration from the .env file."""
     load_dotenv()
 
@@ -53,6 +66,7 @@ def load_config() -> tuple[Path, Path, int, int, str]:
     crf_str = os.getenv("CRF", "28").strip()
     timeout_str = os.getenv("TIMEOUT_SECONDS", "36000").strip()
     output_format = os.getenv("OUTPUT_FORMAT", "source").strip().lower()
+    encoder_preset = os.getenv("ENCODER_PRESET", "medium").strip().lower()
 
     if not input_dir:
         sys.exit("Error: INPUT_DIR is not set in the .env file.")
@@ -74,11 +88,11 @@ def load_config() -> tuple[Path, Path, int, int, str]:
 
     try:
         timeout_seconds = int(timeout_str)
-        if timeout_seconds <= 0:
+        if timeout_seconds < 0:
             raise ValueError
     except ValueError:
         sys.exit(
-            "Error: TIMEOUT_SECONDS must be a positive integer, "
+            "Error: TIMEOUT_SECONDS must be an integer >= 0 (0 disables timeout), "
             f"got '{timeout_str}'."
         )
 
@@ -89,7 +103,14 @@ def load_config() -> tuple[Path, Path, int, int, str]:
             f"{allowed}, got '{output_format}'."
         )
 
-    return input_path, output_path, crf, timeout_seconds, output_format
+    if encoder_preset not in SUPPORTED_X265_PRESETS:
+        allowed = ", ".join(sorted(SUPPORTED_X265_PRESETS))
+        sys.exit(
+            "Error: ENCODER_PRESET must be one of "
+            f"{allowed}, got '{encoder_preset}'."
+        )
+
+    return input_path, output_path, crf, timeout_seconds, output_format, encoder_preset
 
 
 def find_video_files(directory: Path) -> list[Path]:
@@ -196,6 +217,7 @@ def compress_file(
     src: Path,
     dst: Path,
     crf: int,
+    encoder_preset: str,
     ffmpeg_executable: str,
     ffprobe_executable: str | None,
     timeout: int = 36000,
@@ -233,7 +255,7 @@ def compress_file(
         audio_codec_args = ["-c:a", "libmp3lame", "-b:a", "192k"]
         subtitle_args = ["-sn"]
     else:
-        video_codec_args = ["-c:v", "libx265", "-crf", str(crf), "-preset", "medium"]
+        video_codec_args = ["-c:v", "libx265", "-crf", str(crf), "-preset", encoder_preset]
         audio_codec_args = ["-c:a", "aac", "-b:a", "128k"]
         subtitle_codec = "copy" if output_container == ".mkv" else "mov_text"
         subtitle_args = ["-c:s", subtitle_codec]
@@ -278,8 +300,10 @@ def compress_file(
         log_error("[ERROR] ffmpeg executable was not found while starting compression.")
         return False
 
-    killer = threading.Timer(timeout, lambda: (timeout_reached.set(), process.kill()))
-    killer.start()
+    killer: threading.Timer | None = None
+    if timeout > 0:
+        killer = threading.Timer(timeout, lambda: (timeout_reached.set(), process.kill()))
+        killer.start()
 
     latest_processed_seconds = 0.0
     try:
@@ -313,7 +337,8 @@ def compress_file(
 
         process.wait()
     finally:
-        killer.cancel()
+        if killer is not None:
+            killer.cancel()
 
     if total_duration is not None and process.returncode == 0:
         print_progress_bar(total_duration, total_duration)
@@ -345,7 +370,7 @@ def format_size(size_bytes: int) -> str:
 
 
 def main() -> None:
-    input_path, output_path, crf, timeout_seconds, output_format = load_config()
+    input_path, output_path, crf, timeout_seconds, output_format, encoder_preset = load_config()
     ffmpeg_executable = resolve_ffmpeg_executable()
     ffprobe_executable = resolve_ffprobe_executable()
 
@@ -357,7 +382,11 @@ def main() -> None:
         return
 
     log(f"Found {len(video_files)} file(s) to compress (CRF={crf}).")
-    log(f"Timeout per file: {format_duration(timeout_seconds)} ({timeout_seconds}s)")
+    if timeout_seconds == 0:
+        log("Timeout per file: disabled")
+    else:
+        log(f"Timeout per file: {format_duration(timeout_seconds)} ({timeout_seconds}s)")
+    log(f"Encoder preset: {encoder_preset}")
     log(f"Output format: {output_format}")
     log(f"Output folder: {output_path}")
     log()
@@ -375,6 +404,7 @@ def main() -> None:
             src,
             dst,
             crf,
+            encoder_preset,
             ffmpeg_executable,
             ffprobe_executable,
             timeout_seconds,
