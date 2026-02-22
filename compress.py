@@ -112,7 +112,8 @@ def resolve_ffmpeg_executable() -> str:
 
     sys.exit(
         "Error: ffmpeg executable was not found. Install ffmpeg and add it to PATH, "
-        "or use its full executable path in your system PATH settings."
+        "or use its full executable path in your system PATH settings. "
+        "On Windows: choco install ffmpeg -y or winget install Gyan.FFmpeg"
     )
 
 

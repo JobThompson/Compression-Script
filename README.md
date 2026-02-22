@@ -2,10 +2,33 @@
 
 A Python script that compresses MP4 and MKV video files into a smaller file size using H.265 (HEVC) encoding via [ffmpeg](https://ffmpeg.org/).
 
+## Features
+
+- Compresses `.mp4` and `.mkv` files using H.265 (`libx265`) + AAC audio
+- Preserves original filenames/extensions in output (e.g. `movie.mkv -> movie.mkv`)
+- Configurable per-file timeout via `.env` (`TIMEOUT_SECONDS`)
+- Timestamped console logs for all status/error messages
+- Live per-file progress output during compression
+   - Shows percentage progress bar when `ffprobe` is available
+   - Falls back to elapsed processed time when duration cannot be determined
+
 ## Requirements
 
 - Python 3.10+
 - [ffmpeg](https://ffmpeg.org/download.html) installed and available on `PATH`
+- Optional: `ffprobe` on `PATH` for percentage progress bars (usually installed with ffmpeg)
+
+Install ffmpeg on Windows with Chocolatey:
+
+```powershell
+choco install ffmpeg -y
+```
+
+Or with winget:
+
+```powershell
+winget install Gyan.FFmpeg
+```
 
 ## Setup
 
@@ -47,23 +70,30 @@ The script will:
 - Scan `INPUT_DIR` for `.mp4` and `.mkv` files
 - Compress each file using H.265 video and AAC audio
 - Save the results to `OUTPUT_DIR`
+- Print a startup banner with CRF and timeout settings
+- Show timestamped logs for status and errors
+- Show live progress while each file is being compressed
 - Print input/output sizes and space saved for each file
 
 ## Example Output
 
 ```
-Found 3 file(s) to compress (CRF=28).
-Output folder: /path/to/compressed/output
+[2026-02-22 14:01:03] Found 3 file(s) to compress (CRF=28).
+[2026-02-22 14:01:03] Timeout per file: 10:00:00 (36000s)
+[2026-02-22 14:01:03] Output folder: /path/to/compressed/output
 
-[1/3] movie.mkv -> movie.mp4
-  Input size : 4.2 GB
-  Output size: 1.8 GB
-  Saved      : 2.4 GB
+[2026-02-22 14:01:03] [1/3] movie.mkv -> movie.mkv
+[2026-02-22 14:01:03]   Input size : 4.2 GB
+[2026-02-22 14:07:41] Progress   : [##########--------------------] 34.1% (00:42:12/02:03:44)
+[2026-02-22 14:20:20] Progress   : [##############################] 100.0% (02:03:44/02:03:44)
+[2026-02-22 14:20:20]   Output size: 1.8 GB
+[2026-02-22 14:20:20]   Saved      : 2.4 GB
 
-[2/3] clip.mp4 -> clip.mp4
-  Input size : 850.0 MB
-  Output size: 310.5 MB
-  Saved      : 539.5 MB
+[2026-02-22 14:20:20] [2/3] clip.mp4 -> clip.mp4
+[2026-02-22 14:20:20]   Input size : 850.0 MB
+[2026-02-22 14:26:05] Progress   : 00:05:44 processed
+[2026-02-22 14:30:18]   Output size: 310.5 MB
+[2026-02-22 14:30:18]   Saved      : 539.5 MB
 ...
-Done. 3/3 file(s) compressed successfully.
+[2026-02-22 15:02:11] Done. 3/3 file(s) compressed successfully.
 ```
