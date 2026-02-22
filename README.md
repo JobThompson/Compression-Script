@@ -27,13 +27,15 @@ A Python script that compresses MP4 and MKV video files into a smaller file size
    INPUT_DIR=/path/to/your/videos
    OUTPUT_DIR=/path/to/compressed/output
    CRF=28
+   TIMEOUT_SECONDS=36000
    ```
 
-   | Variable     | Description                                                                 |
-   |-------------|-----------------------------------------------------------------------------|
-   | `INPUT_DIR`  | Folder containing the source MP4/MKV files to compress                      |
-   | `OUTPUT_DIR` | Folder where the compressed files will be saved (created if it doesn't exist) |
-   | `CRF`        | Constant Rate Factor for H.265 (0–51). Lower = better quality, larger file. Default: `28` |
+   | Variable          | Description                                                                 |
+   |------------------|-----------------------------------------------------------------------------|
+   | `INPUT_DIR`       | Folder containing the source MP4/MKV files to compress                      |
+   | `OUTPUT_DIR`      | Folder where the compressed files will be saved (created if it doesn't exist) |
+   | `CRF`             | Constant Rate Factor for H.265 (0–51). Lower = better quality, larger file. Default: `28` |
+   | `TIMEOUT_SECONDS` | Max runtime per file before ffmpeg is stopped. Must be a positive integer. Default: `36000` (10 hours) |
 
 ## Usage
 
