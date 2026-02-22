@@ -7,6 +7,7 @@ A Python script that compresses MP4 and MKV video files into a smaller file size
 - Compresses `.mp4` and `.mkv` files using H.265 (`libx265`) + AAC audio (AVI output uses Xvid + MP3)
 - Preserves original filenames/extensions in output (e.g. `movie.mkv -> movie.mkv`)
 - Supports output container selection via `.env` (`OUTPUT_FORMAT=source|mkv|mp4|avi`)
+- Supports encoder backend selection via `.env` (`ENCODER_TYPE=cpu|nvidia|intel|amd`)
 - Supports x265 speed/quality tuning via `.env` (`ENCODER_PRESET`)
 - Preserves caption/subtitle streams from the source file for MKV/MP4 outputs
 - Auto-embeds matching sidecar `.srt` (same filename) into `.mkv` outputs
@@ -57,6 +58,7 @@ winget install Gyan.FFmpeg
    TIMEOUT_SECONDS=36000
    OUTPUT_FORMAT=source
    ENCODER_PRESET=medium
+   ENCODER_TYPE=cpu
    ```
 
    | Variable          | Description                                                                 |
@@ -66,14 +68,49 @@ winget install Gyan.FFmpeg
    | `CRF`             | Constant Rate Factor for H.265 (0–51). Lower = better quality, larger file. Default: `28` |
    | `TIMEOUT_SECONDS` | Max runtime per file before ffmpeg is stopped. Integer `>= 0`; `0` disables timeout. Default: `36000` (10 hours) |
    | `OUTPUT_FORMAT`   | Output container format: `source`, `mkv`, `mp4`, or `avi`. Default: `source` |
-   | `ENCODER_PRESET`  | x265 preset for MKV/MP4 output (`ultrafast`..`placebo`). Faster presets run quicker but can increase output size. Default: `medium` |
+   | `ENCODER_PRESET`  | x265 preset for CPU encoding (`ultrafast`..`placebo`). Ignored for `nvidia`, `intel`, and `amd`. Default: `medium` |
+   | `ENCODER_TYPE`    | Video encoder backend for `source`/`mkv`/`mp4`: `cpu` (`libx265`), `nvidia` (`hevc_nvenc`), `intel` (`hevc_qsv`), `amd` (`hevc_amf`). Default: `cpu` |
 
-For very large files (50GB+), recommended settings:
+### Recommended `.env` profiles
 
-```ini
-TIMEOUT_SECONDS=0
-ENCODER_PRESET=faster
-```
+Use one of these as a starting point:
+
+- **CPU (best compression efficiency, slower):**
+
+   ```ini
+   ENCODER_TYPE=cpu
+   ENCODER_PRESET=medium
+   CRF=28
+   TIMEOUT_SECONDS=0
+   ```
+
+- **Nvidia (`hevc_nvenc`, fastest on supported NVIDIA GPUs):**
+
+   ```ini
+   ENCODER_TYPE=nvidia
+   CRF=28
+   TIMEOUT_SECONDS=0
+   ```
+
+- **Intel (`hevc_qsv`, good speed on Intel iGPU):**
+
+   ```ini
+   ENCODER_TYPE=intel
+   CRF=28
+   TIMEOUT_SECONDS=0
+   ```
+
+- **AMD (`hevc_amf`, good speed on supported AMD GPUs):**
+
+   ```ini
+   ENCODER_TYPE=amd
+   CRF=28
+   TIMEOUT_SECONDS=0
+   ```
+
+Notes:
+- `ENCODER_PRESET` is used only when `ENCODER_TYPE=cpu`.
+- If ffmpeg exits with an encoder-not-available error, install an ffmpeg build that includes your GPU encoder.
 
 ## Usage
 
@@ -98,6 +135,7 @@ The script will:
 ```
 [2026-02-22 14:01:03] Found 3 file(s) to compress (CRF=28).
 [2026-02-22 14:01:03] Timeout per file: 10:00:00 (36000s)
+[2026-02-22 14:01:03] Encoder type: nvidia
 [2026-02-22 14:01:03] Encoder preset: medium
 [2026-02-22 14:01:03] Output format: source
 [2026-02-22 14:01:03] Output folder: /path/to/compressed/output

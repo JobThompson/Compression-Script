@@ -8,7 +8,8 @@ Reads configuration from a .env file in the same directory:
   CRF              - Constant Rate Factor for H.265 encoding (default: 28)
     TIMEOUT_SECONDS  - maximum ffmpeg runtime per file (default: 36000, 0=disabled)
     OUTPUT_FORMAT    - output container: source, mkv, mp4, avi (default: source)
-    ENCODER_PRESET   - x265 preset for mkv/mp4 outputs (default: medium)
+    ENCODER_PRESET   - x265 preset for CPU encoding (default: medium)
+    ENCODER_TYPE     - encoder backend: cpu, nvidia, intel, amd (default: cpu)
 
 Requires ffmpeg to be installed and available on PATH.
 """
@@ -37,6 +38,7 @@ SUPPORTED_X265_PRESETS = {
     "veryslow",
     "placebo",
 }
+SUPPORTED_ENCODER_TYPES = {"cpu", "nvidia", "intel", "amd"}
 
 
 def timestamp_prefix() -> str:
@@ -57,7 +59,7 @@ def log_error(message: str) -> None:
     print(f"{timestamp_prefix()} {message}", file=sys.stderr)
 
 
-def load_config() -> tuple[Path, Path, int, int, str, str]:
+def load_config() -> tuple[Path, Path, int, int, str, str, str]:
     """Load and validate configuration from the .env file."""
     load_dotenv()
 
@@ -67,6 +69,7 @@ def load_config() -> tuple[Path, Path, int, int, str, str]:
     timeout_str = os.getenv("TIMEOUT_SECONDS", "36000").strip()
     output_format = os.getenv("OUTPUT_FORMAT", "source").strip().lower()
     encoder_preset = os.getenv("ENCODER_PRESET", "medium").strip().lower()
+    encoder_type = os.getenv("ENCODER_TYPE", "cpu").strip().lower()
 
     if not input_dir:
         sys.exit("Error: INPUT_DIR is not set in the .env file.")
@@ -103,14 +106,83 @@ def load_config() -> tuple[Path, Path, int, int, str, str]:
             f"{allowed}, got '{output_format}'."
         )
 
-    if encoder_preset not in SUPPORTED_X265_PRESETS:
+    if encoder_type not in SUPPORTED_ENCODER_TYPES:
+        allowed = ", ".join(sorted(SUPPORTED_ENCODER_TYPES))
+        sys.exit(
+            "Error: ENCODER_TYPE must be one of "
+            f"{allowed}, got '{encoder_type}'."
+        )
+
+    if encoder_type == "cpu" and encoder_preset not in SUPPORTED_X265_PRESETS:
         allowed = ", ".join(sorted(SUPPORTED_X265_PRESETS))
         sys.exit(
             "Error: ENCODER_PRESET must be one of "
             f"{allowed}, got '{encoder_preset}'."
         )
 
-    return input_path, output_path, crf, timeout_seconds, output_format, encoder_preset
+    return (
+        input_path,
+        output_path,
+        crf,
+        timeout_seconds,
+        output_format,
+        encoder_preset,
+        encoder_type,
+    )
+
+
+def get_required_video_encoder_name(encoder_type: str) -> str:
+    """Return the ffmpeg video encoder name for the selected encoder backend."""
+    return {
+        "cpu": "libx265",
+        "nvidia": "hevc_nvenc",
+        "intel": "hevc_qsv",
+        "amd": "hevc_amf",
+    }[encoder_type]
+
+
+def get_available_ffmpeg_encoders(ffmpeg_executable: str) -> set[str]:
+    """Return the set of encoder names reported by ffmpeg -encoders."""
+    cmd = [ffmpeg_executable, "-hide_banner", "-encoders"]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except subprocess.SubprocessError:
+        return set()
+
+    if result.returncode != 0:
+        return set()
+
+    encoders: set[str] = set()
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("-") or line.startswith("Encoders:"):
+            continue
+
+        parts = line.split()
+        if len(parts) >= 2 and len(parts[0]) >= 6:
+            encoders.add(parts[1])
+
+    return encoders
+
+
+def get_video_codec_args(crf: int, encoder_preset: str, encoder_type: str) -> tuple[list[str], str]:
+    """Build ffmpeg video codec args and return args plus resolved encoder name."""
+    if encoder_type == "cpu":
+        return ["-c:v", "libx265", "-crf", str(crf), "-preset", encoder_preset], "libx265"
+
+    if encoder_type == "nvidia":
+        return ["-c:v", "hevc_nvenc", "-cq", str(crf), "-preset", "p5"], "hevc_nvenc"
+
+    if encoder_type == "intel":
+        return ["-c:v", "hevc_qsv", "-global_quality", str(crf), "-preset", "medium"], "hevc_qsv"
+
+    return ["-c:v", "hevc_amf", "-rc", "cqp", "-qp_i", str(crf), "-qp_p", str(crf)], "hevc_amf"
 
 
 def find_video_files(directory: Path) -> list[Path]:
@@ -218,12 +290,13 @@ def compress_file(
     dst: Path,
     crf: int,
     encoder_preset: str,
+    encoder_type: str,
     ffmpeg_executable: str,
     ffprobe_executable: str | None,
     timeout: int = 36000,
 ) -> bool:
     """
-    Compress *src* into *dst* using H.265 (libx265) video and AAC audio.
+    Compress *src* into *dst* using the selected video encoder backend and AAC audio.
 
     Returns True on success, False on failure.
     The *timeout* parameter limits how long ffmpeg may run (default: 10 hours).
@@ -255,7 +328,7 @@ def compress_file(
         audio_codec_args = ["-c:a", "libmp3lame", "-b:a", "192k"]
         subtitle_args = ["-sn"]
     else:
-        video_codec_args = ["-c:v", "libx265", "-crf", str(crf), "-preset", encoder_preset]
+        video_codec_args, _ = get_video_codec_args(crf, encoder_preset, encoder_type)
         audio_codec_args = ["-c:a", "aac", "-b:a", "128k"]
         subtitle_codec = "copy" if output_container == ".mkv" else "mov_text"
         subtitle_args = ["-c:s", subtitle_codec]
@@ -370,9 +443,27 @@ def format_size(size_bytes: int) -> str:
 
 
 def main() -> None:
-    input_path, output_path, crf, timeout_seconds, output_format, encoder_preset = load_config()
+    """Run the compression workflow for all supported input files."""
+    (
+        input_path,
+        output_path,
+        crf,
+        timeout_seconds,
+        output_format,
+        encoder_preset,
+        encoder_type,
+    ) = load_config()
     ffmpeg_executable = resolve_ffmpeg_executable()
     ffprobe_executable = resolve_ffprobe_executable()
+
+    if output_format != "avi":
+        required_encoder = get_required_video_encoder_name(encoder_type)
+        available_encoders = get_available_ffmpeg_encoders(ffmpeg_executable)
+        if available_encoders and required_encoder not in available_encoders:
+            sys.exit(
+                "Error: Selected ENCODER_TYPE requires ffmpeg encoder "
+                f"'{required_encoder}', but it is not available in this ffmpeg build."
+            )
 
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -386,7 +477,11 @@ def main() -> None:
         log("Timeout per file: disabled")
     else:
         log(f"Timeout per file: {format_duration(timeout_seconds)} ({timeout_seconds}s)")
-    log(f"Encoder preset: {encoder_preset}")
+    log(f"Encoder type: {encoder_type}")
+    if encoder_type == "cpu":
+        log(f"Encoder preset: {encoder_preset}")
+    else:
+        log(f"Encoder preset: {encoder_preset} (ignored for {encoder_type})")
     log(f"Output format: {output_format}")
     log(f"Output folder: {output_path}")
     log()
@@ -405,6 +500,7 @@ def main() -> None:
             dst,
             crf,
             encoder_preset,
+            encoder_type,
             ffmpeg_executable,
             ffprobe_executable,
             timeout_seconds,
