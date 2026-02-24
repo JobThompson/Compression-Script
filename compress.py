@@ -5,6 +5,7 @@ compress.py - Compress MP4 and MKV video files to reduce file size.
 Reads configuration from a .env file in the same directory:
   INPUT_DIR        - folder containing source video files
   OUTPUT_DIR       - folder where compressed files will be saved
+    COMPRESSION_MODE - lossy or lossless (default: lossy)
   CRF              - Constant Rate Factor for H.265 encoding (default: 28)
     TIMEOUT_SECONDS  - maximum ffmpeg runtime per file (default: 36000, 0=disabled)
     OUTPUT_FORMAT    - output container: source, mkv, mp4, avi (default: source)
@@ -39,6 +40,7 @@ SUPPORTED_X265_PRESETS = {
     "placebo",
 }
 SUPPORTED_ENCODER_TYPES = {"cpu", "nvidia", "intel", "amd"}
+SUPPORTED_COMPRESSION_MODES = {"lossy", "lossless"}
 
 
 def timestamp_prefix() -> str:
@@ -59,12 +61,13 @@ def log_error(message: str) -> None:
     print(f"{timestamp_prefix()} {message}", file=sys.stderr)
 
 
-def load_config() -> tuple[Path, Path, int, int, str, str, str]:
+def load_config() -> tuple[Path, Path, str, int, int, str, str, str]:
     """Load and validate configuration from the .env file."""
     load_dotenv()
 
     input_dir = os.getenv("INPUT_DIR", "").strip()
     output_dir = os.getenv("OUTPUT_DIR", "").strip()
+    compression_mode = os.getenv("COMPRESSION_MODE", "lossy").strip().lower()
     crf_str = os.getenv("CRF", "28").strip()
     timeout_str = os.getenv("TIMEOUT_SECONDS", "36000").strip()
     output_format = os.getenv("OUTPUT_FORMAT", "source").strip().lower()
@@ -81,6 +84,13 @@ def load_config() -> tuple[Path, Path, int, int, str, str, str]:
 
     if not input_path.is_dir():
         sys.exit(f"Error: INPUT_DIR '{input_dir}' is not a valid directory.")
+
+    if compression_mode not in SUPPORTED_COMPRESSION_MODES:
+        allowed = ", ".join(sorted(SUPPORTED_COMPRESSION_MODES))
+        sys.exit(
+            "Error: COMPRESSION_MODE must be one of "
+            f"{allowed}, got '{compression_mode}'."
+        )
 
     try:
         crf = int(crf_str)
@@ -123,6 +133,7 @@ def load_config() -> tuple[Path, Path, int, int, str, str, str]:
     return (
         input_path,
         output_path,
+        compression_mode,
         crf,
         timeout_seconds,
         output_format,
@@ -171,8 +182,23 @@ def get_available_ffmpeg_encoders(ffmpeg_executable: str) -> set[str]:
     return encoders
 
 
-def get_video_codec_args(crf: int, encoder_preset: str, encoder_type: str) -> tuple[list[str], str]:
+def get_video_codec_args(
+    crf: int,
+    encoder_preset: str,
+    encoder_type: str,
+    compression_mode: str,
+) -> tuple[list[str], str]:
     """Build ffmpeg video codec args and return args plus resolved encoder name."""
+    if encoder_type == "cpu" and compression_mode == "lossless":
+        return [
+            "-c:v",
+            "libx265",
+            "-preset",
+            encoder_preset,
+            "-x265-params",
+            "lossless=1",
+        ], "libx265"
+
     if encoder_type == "cpu":
         return ["-c:v", "libx265", "-crf", str(crf), "-preset", encoder_preset], "libx265"
 
@@ -288,6 +314,7 @@ def print_progress_bar(processed_seconds: float, total_seconds: float) -> None:
 def compress_file(
     src: Path,
     dst: Path,
+    compression_mode: str,
     crf: int,
     encoder_preset: str,
     encoder_type: str,
@@ -328,8 +355,11 @@ def compress_file(
         audio_codec_args = ["-c:a", "libmp3lame", "-b:a", "192k"]
         subtitle_args = ["-sn"]
     else:
-        video_codec_args, _ = get_video_codec_args(crf, encoder_preset, encoder_type)
-        audio_codec_args = ["-c:a", "aac", "-b:a", "128k"]
+        video_codec_args, _ = get_video_codec_args(crf, encoder_preset, encoder_type, compression_mode)
+        if compression_mode == "lossless":
+            audio_codec_args = ["-c:a", "copy"]
+        else:
+            audio_codec_args = ["-c:a", "aac", "-b:a", "128k"]
         subtitle_codec = "copy" if output_container == ".mkv" else "mov_text"
         subtitle_args = ["-c:s", subtitle_codec]
 
@@ -447,6 +477,7 @@ def main() -> None:
     (
         input_path,
         output_path,
+        compression_mode,
         crf,
         timeout_seconds,
         output_format,
@@ -455,6 +486,14 @@ def main() -> None:
     ) = load_config()
     ffmpeg_executable = resolve_ffmpeg_executable()
     ffprobe_executable = resolve_ffprobe_executable()
+
+    if compression_mode == "lossless" and output_format == "avi":
+        sys.exit("Error: COMPRESSION_MODE=lossless is not supported when OUTPUT_FORMAT=avi.")
+
+    if compression_mode == "lossless" and encoder_type != "cpu":
+        sys.exit(
+            "Error: COMPRESSION_MODE=lossless currently supports ENCODER_TYPE=cpu only."
+        )
 
     if output_format != "avi":
         required_encoder = get_required_video_encoder_name(encoder_type)
@@ -472,11 +511,15 @@ def main() -> None:
         log(f"No MP4 or MKV files found in '{input_path}'.")
         return
 
-    log(f"Found {len(video_files)} file(s) to compress (CRF={crf}).")
+    if compression_mode == "lossless":
+        log(f"Found {len(video_files)} file(s) to compress (mode=lossless).")
+    else:
+        log(f"Found {len(video_files)} file(s) to compress (CRF={crf}).")
     if timeout_seconds == 0:
         log("Timeout per file: disabled")
     else:
         log(f"Timeout per file: {format_duration(timeout_seconds)} ({timeout_seconds}s)")
+    log(f"Compression mode: {compression_mode}")
     log(f"Encoder type: {encoder_type}")
     if encoder_type == "cpu":
         log(f"Encoder preset: {encoder_preset}")
@@ -498,6 +541,7 @@ def main() -> None:
         if compress_file(
             src,
             dst,
+            compression_mode,
             crf,
             encoder_preset,
             encoder_type,

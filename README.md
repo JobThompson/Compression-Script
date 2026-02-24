@@ -7,6 +7,7 @@ A Python script that compresses MP4 and MKV video files into a smaller file size
 - Compresses `.mp4` and `.mkv` files using H.265 (`libx265`) + AAC audio (AVI output uses Xvid + MP3)
 - Preserves original filenames/extensions in output (e.g. `movie.mkv -> movie.mkv`)
 - Supports output container selection via `.env` (`OUTPUT_FORMAT=source|mkv|mp4|avi`)
+- Supports compression mode selection via `.env` (`COMPRESSION_MODE=lossy|lossless`)
 - Supports encoder backend selection via `.env` (`ENCODER_TYPE=cpu|nvidia|intel|amd`)
 - Supports x265 speed/quality tuning via `.env` (`ENCODER_PRESET`)
 - Preserves caption/subtitle streams from the source file for MKV/MP4 outputs
@@ -54,6 +55,7 @@ winget install Gyan.FFmpeg
    ```ini
    INPUT_DIR=/path/to/your/videos
    OUTPUT_DIR=/path/to/compressed/output
+   COMPRESSION_MODE=lossy
    CRF=28
    TIMEOUT_SECONDS=36000
    OUTPUT_FORMAT=source
@@ -65,6 +67,7 @@ winget install Gyan.FFmpeg
    |------------------|-----------------------------------------------------------------------------|
    | `INPUT_DIR`       | Folder containing the source MP4/MKV files to compress                      |
    | `OUTPUT_DIR`      | Folder where the compressed files will be saved (created if it doesn't exist) |
+   | `COMPRESSION_MODE`| Compression mode: `lossy` (default) uses re-encode for smaller files; `lossless` preserves source quality using x265 lossless video + copied audio. |
    | `CRF`             | Constant Rate Factor for H.265 (0–51). Lower = better quality, larger file. Default: `28` |
    | `TIMEOUT_SECONDS` | Max runtime per file before ffmpeg is stopped. Integer `>= 0`; `0` disables timeout. Default: `36000` (10 hours) |
    | `OUTPUT_FORMAT`   | Output container format: `source`, `mkv`, `mp4`, or `avi`. Default: `source` |
@@ -110,6 +113,8 @@ Use one of these as a starting point:
 
 Notes:
 - `ENCODER_PRESET` is used only when `ENCODER_TYPE=cpu`.
+- `COMPRESSION_MODE=lossless` currently supports `ENCODER_TYPE=cpu` only.
+- `COMPRESSION_MODE=lossless` cannot be used with `OUTPUT_FORMAT=avi`.
 - If ffmpeg exits with an encoder-not-available error, install an ffmpeg build that includes your GPU encoder.
 
 ## Usage
@@ -120,7 +125,9 @@ python compress.py
 
 The script will:
 - Scan `INPUT_DIR` for `.mp4` and `.mkv` files
-- Compress each file using H.265 video and AAC audio
+- Compress each file using `COMPRESSION_MODE`:
+   - `lossy`: H.265 video + AAC audio
+   - `lossless`: x265 lossless video + copied audio streams
 - Keep subtitle/caption streams from the source file
 - Add `movie.srt` automatically when output is MKV and `movie.mkv` is being compressed (if found in the same folder)
 - Write outputs using `OUTPUT_FORMAT` (including `avi`)
